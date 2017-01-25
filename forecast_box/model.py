@@ -10,55 +10,55 @@ from collections import namedtuple
 import statsmodels.api as sm
 
 
-ModelSpec = namedtuple('ModelSpec', ['name', 'forward_steps', 'params'])
+ModelSpec = namedtuple('ModelSpec', ['name', 'params'])
 
 
 class Model:
-    """Abstract class of Models, which are used to train time series models
+    """Class used for training and predicting with time series models
 
-    Static Method
-    -------------
-    create (name, forward_steps, params):
-        Looks up a type of Model input name (str), and instantiates
-        the object by passing forward_steps (int) and params (dict).
+    Members
+    ----------
+    forward_steps:
+        Integer s.t. Model predicts the value at t = N + forward_steps
+        given a time_series of length N.  Defaults to forward_steps = 1.
 
-    Inherited by Models
-    -------------------
+    predicted_values:
+        Predicted value at time t = N + forward_steps.  Has None value until
+        train() method is used.
 
-        Parameters
-        ----------
-        forward_steps:
-            Models predict the value at t = N + forward_steps given
-            time_series of length N.  Most commonly, forward_steps = 1.
+    Methods
+    -------
+    @staticmethod
+    create (name, params):
+        Instantiates Model object based on name (str).
+        Optionally, can provide a dict of params specific to named Model.
 
-        Methods
-        -------
-        train (time_series):
-            Takes pd.Series object indexed by pd.tslib.Timestamp and fits model
-            parameters. Learned parameters are saved in Model object.
+    train (time_series):
+        Takes pd.Series object indexed by pd.DatetimeIndex and fits model
+        parameters.  Learned parameters are saved in Model object.
 
-        predict ():
-            Returns predicted value (float) for trained time_series.
+    predict ():
+        Returns predicted value (float) for trained time_series.
 
-            TODO 1:  Allow return of pd.Series with pd.tslib.Timestamp index
-            TODO 2:  Allow input of alternative pd.Series object (test set)
+        TODO 1:  Allow return of pd.Series with pd.DatetimeIndex index
+        TODO 2:  Allow input of alternative pd.Series object (test set)
 
     """
 
     @staticmethod
-    def create(name, forward_steps, params):
+    def create(name, params):
         if name == 'last_value':
-            return LastValue(forward_steps)
+            return LastValue(**params)
         if name == 'seasonal_mean':
-            return SeasonalMean(forward_steps, **params)
+            return SeasonalMean(**params)
         if name == 'classical_decomposition':
-            return ClassicalDecomposition(forward_steps, **params)
+            return ClassicalDecomposition(**params)
         if name == 'arima':
-            return Arima(forward_steps, **params)
+            return Arima(**params)
         else:
-            raise Exception('Model class doesnt exist.')
+            raise Exception(name + '-class of Model doesnt exist.')
 
-    def __init__(self, forward_steps):
+    def __init__(self, forward_steps=1):
         self.forward_steps = forward_steps
         self.predicted_values = None
 
@@ -69,11 +69,21 @@ class Model:
         return self.predicted_values
 
 
+# class LastValue(Model):
+#     def __init__(self, forward_steps):
+#         Model.__init__(self, forward_steps)
+#
+#     def train(self, time_series):
+#         #self.model = lambda x: x[-1]
+#         self.predicted_values = time_series[-1]
+
+
 class LastValue(Model):
     def __init__(self, forward_steps):
         Model.__init__(self, forward_steps)
 
     def train(self, time_series):
+        self.model = lambda x: x[-1]
         self.predicted_values = time_series[-1]
 
 
