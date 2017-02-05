@@ -7,116 +7,155 @@ Model class
 import numpy as np
 import pandas as pd
 from collections import namedtuple
-import statsmodels.api as sm
+from sklearn import linear_model
+from _util import *
 
 
-ModelSpec = namedtuple('ModelSpec', ['name', 'params'])
 
-
-class Model:
+# TODO: incorporate X_raw into X_train for train() and forecast()
+# TODO: extend train() and forecast() to allow for multivariate response
+class Model(object):
     """Class used for training and predicting with time series models
 
-    Members
+    Parameters
     ----------
     forward_steps:
-        Integer s.t. Model predicts the value at t = N + forward_steps
-        given a time_series of length N.  Defaults to forward_steps = 1.
+        list of ints such that Model predicts the value(s) at
+        time = N + forward_steps given a time_series of length N.
 
-    predicted_values:
-        Predicted value at time t = N + forward_steps.  Has None value until
-        train() method is used.
+    ar_orders:
+        list of ints representing number of autoregressive terms as
+        features when converting time_series input into matrix X for
+        training and/or testing.
+
+    Members
+    -------
+    fixed_params:
+        dict storing parameters. Keys include 'forward_steps' and 'ar_orders'.
+        See specific Model implementations for additional keys.
+
+    data:
+        dict storing input data passed to train() with keys 'y' and 'X'.
+        Values are initialized to None.
+
+    trained_params:
+        dict where key = forward_step, and value = trained parameters.
+        Values are initialized to None.
+        See specific Model implementations for keys.
+
+    fitted_values:
+        dict where key = forward_step, and value = fitted time_series.
+        Values are initialized to None.
 
     Methods
     -------
     @staticmethod
     create (name, params):
-        Instantiates Model object based on name (str).
-        Optionally, can provide a dict of params specific to named Model.
+        Instantiates Model object based on name (str) and a dict of params
+        specific to named Model.
 
-    train (time_series):
-        Takes pd.Series object indexed by pd.DatetimeIndex and fits model
-        parameters.  Learned parameters are saved in Model object.
+    train (y_raw, X_raw=None):
+        Fits model parameters using response vector 'y' and (optional)
+        feature matrix 'X'.  Inputs should be pd.Series / pd.DataFrame,
+        respectively, both indexed by pd.DatetimeIndex.
+        Input data, learned parameters, and fitted values for each
+        'forward_step' are saved as members.
 
-    predict ():
-        Returns predicted value (float) for trained time_series.
-
-        TODO 1:  Allow return of pd.Series with pd.DatetimeIndex index
-        TODO 2:  Allow input of alternative pd.Series object (test set)
-
+    forecast (y_raw, X_raw=None):
+        Returns pd.Series of forecasted values looking forward from
+        last time index of 'y_raw' and 'X_raw' inputs.
     """
 
     @staticmethod
     def create(name, params):
-        if name == 'last_value':
-            return LastValue(**params)
-        if name == 'seasonal_mean':
-            return SeasonalMean(**params)
-        if name == 'classical_decomposition':
-            return ClassicalDecomposition(**params)
-        if name == 'arima':
-            return Arima(**params)
-        else:
+        possible_models = {
+            'last_value': LastValue,
+            'mean': Mean,
+            'linear_regression': LinearRegression
+        }
+
+        if possible_models.get(name) is None:
             raise Exception(name + '-class of Model doesnt exist.')
+        else:
+            model = possible_models[name](**params)
+            model.name = name
 
-    def __init__(self, forward_steps=1):
-        self.forward_steps = forward_steps
-        self.predicted_values = None
+        return model
 
-    def train(self, time_series):
+    def __init__(self, forward_steps, ar_orders):
+        self.name = None
+        self.fixed_params = {'forward_steps': forward_steps,
+                             'ar_orders': ar_orders}
+        self.data = {'y': None,
+                     'X': None}
+        self.is_trained = False
+        self.trained_params = {s: None for s in forward_steps}
+        self.fitted_values = {s: None for s in forward_steps}
+
+    def train(self, y_raw, X_raw=None):
+        self.data['y'] = y_raw
+        self.data['X'] = X_raw
+        for s, o in zip(self.fixed_params['forward_steps'],
+                        self.fixed_params['ar_orders']):
+            y_train = build_y_train(y_raw, s, o)
+            X_train = build_X_train(y_raw, s, o)
+            self.trained_params[s] = self._train_once(y_train, X_train)
+            self.fitted_values[s] = self._predict_once(X_train, s)
+        self.is_trained = True
+
+    def forecast(self, y_raw, X_raw=None):
+        forecasted_values = []
+        for s, o in zip(self.fixed_params['forward_steps'],
+                        self.fixed_params['ar_orders']):
+            X_forecast = build_X_forecast(y_raw, s, o)
+            forecasted_values.append(self._predict_once(X_forecast, s))
+        return pd.concat(forecasted_values, axis=0)
+
+    def _train_once(self, y_train, X_train):
         raise NotImplementedError
 
-    def predict(self):
-        return self.predicted_values
-
-
-# class LastValue(Model):
-#     def __init__(self, forward_steps):
-#         Model.__init__(self, forward_steps)
-#
-#     def train(self, time_series):
-#         #self.model = lambda x: x[-1]
-#         self.predicted_values = time_series[-1]
+    def _predict_once(self, X_test, forward_step):
+        raise NotImplementedError
 
 
 class LastValue(Model):
-    def __init__(self, forward_steps):
-        Model.__init__(self, forward_steps)
+    """Forecasts future value is equal to the last observed value
 
-    def train(self, time_series):
-        self.model = lambda x: x[-1]
-        self.predicted_values = time_series[-1]
+        e.g.  If today is the 10th and forward_steps = [2, 4] then
+              I predict the values for the 12th and 14th to be equal to the
+              value observed today.
+    """
 
+    def _train_once(self, y_train, X_train):
+        return {}
 
-class SeasonalMean(Model):
-    def __init__(self, forward_steps, period=7):
-        Model.__init__(self, forward_steps)
-        self.period = period
-        self.seasonal_means = None
-
-    def train(self, time_series):
-        values_by_season = [[]] * self.period
-
-        i = 0
-        while i < time_series.size:
-            values_by_season[i % self.period].append(time_series[i])
-            i += 1
-
-        self.seasonal_means = np.mean(values_by_season, axis=0)
-        self.predicted_values = self.seasonal_means[
-            (i + self.forward_steps - 1) % self.period]
+    def _predict_once(self, X_test, forward_step):
+        return X_test.iloc[:,0]
 
 
-class ClassicalDecomposition(Model):
-    def train(self, time_series):
-        return None
+class Mean(Model):
+    """Forecasts future value is equal to the average of past values"""
 
-    def predict(self):
-        return None
+    def _train_once(self, y_train, X_train):
+        return {}
+
+    def _predict_once(self, X_test, forward_step):
+        return X_test.mean(axis=1)
+        #return pd.Series(data=X_test.values.mean(axis=1), index=X_test.index)
 
 
-class Arima(Model):
-    def train(self, time_series):
-        return None
+class LinearRegression(Model):
+    """Forecasts future value by fitting linear regression model on AR terms"""
 
-    def predict(self):
-        return None
+    # def __init__(self, forward_steps, ar_orders):
+    #     Model.__init__(forward_steps, ar_orders)
+
+    def _train_once(self, y_train, X_train):
+        model = linear_model.LinearRegression().fit(X=X_train,
+                                                    y=y_train)
+        return {'model': model}
+
+    def _predict_once(self, X_test, forward_step):
+        model = self.trained_params[forward_step]['model']
+        return pd.DataFrame(model.predict(X_test), index=X_test.index)
+

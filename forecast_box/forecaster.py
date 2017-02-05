@@ -7,7 +7,7 @@ Forecaster class
 from operation import *
 
 
-class Forecaster:
+class Forecaster(object):
     """Core class that produces forecasted values given time series data
 
     Members
@@ -43,5 +43,4 @@ class Forecaster:
         self.start_operation = start_operation
 
     def forecast(self, time_series):
-        #TODO: check if pandas Series object
         return self.start_operation.apply(time_series)

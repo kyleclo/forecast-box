@@ -12,7 +12,7 @@ from model import *
 OpSpec = namedtuple('OpSpec', ['name', 'params'])
 
 
-class Operation:
+class Operation(object):
     """Class containing transformations, filters, etc. applied to time_series
 
     Members
@@ -25,36 +25,36 @@ class Operation:
     -------
     @staticmethod
     create (name, params):
-        Instantiates Operation object based on name (str).
-        Optionally, can provide a dict of params specific to named Model.
+        Instantiates Operation object based on name (str) and a dict of params
+        specific to named Operation.
 
     apply (time_series):
-        Takes pd.Series object indexed by pd.DatetimeIndex and passes
-        modified version to next Operation.  Finally returns a pd.Series
-        object after completing recursion stack.
+        Takes pd.Series object indexed by pd.DatetimeIndex, performs a
+        transformation, and passes modified series to next Operation to
+        apply. Finally returns series after completing recursion stack.
     """
 
     @staticmethod
     def create(name, params):
-        if name == 'predict':
-            return Predict(**params)
-        if name == 'changepoint_truncate':
-            return ChangepointTruncate(**params)
-        if name == 'smoothing_filter':
-            return SmoothingFilter(**params)
-        if name == 'stabilize_variance':
-            return StabilizeVariance(**params)
-        if name == 'normalization':
-            return Normalization(**params)
-        else:
+        possible_operations = {
+            'forecast': Forecast,
+            'smoothing_filter': SmoothingFilter,
+            'stabilize_variance': StabilizeVariance,
+            'normalization': Normalization
+        }
+
+        if possible_operations.get(name) is None:
             raise Exception(name + '-type of Operation doesnt exist.')
+        else:
+            operation = possible_operations[name](**params)
+
+        return operation
 
     def __init__(self):
         self.next_operation = None
 
     def apply(self, time_series):
-        print 'Not implemented yet. Skipping...'
-        return self._continue(time_series)
+        raise NotImplementedError
 
     def _continue(self, time_series):
         if self.next_operation is None:
@@ -63,35 +63,28 @@ class Operation:
             return self.next_operation.apply(time_series)
 
 
-class Predict(Operation):
-    """Operation that fits a specified Model and predicts a future value
+class Forecast(Operation):
+    """Operation that fits a specified Model and forecasts future value(s)
 
     Parameters
     ----------
-    model_spec:
-        OpSpec namedtuple with 'name' (str) and 'params' (dict) fields
+    name:
+        str for Model.create()
 
+    params:
+        dict of parameters to pass into Model.create()
     """
 
-    def __init__(self, model_spec):
+    def __init__(self, model):
         Operation.__init__(self)
-        self.model_name = model_spec.name
-        self.model_params = model_spec.params
+        self.model = model
 
     def apply(self, time_series):
-        print 'Predicting future value(s)...'
+        print 'Forecasting future value(s)...'
 
-        model = Model.create(self.model_name, self.model_params)
-        model.train(time_series)
-        time_series = model.predict()
-
-        return self._continue(time_series)
-
-
-class ChangepointTruncate(Operation):
-    def __init__(self, min_length=100):
-        Operation.__init__(self)
-        self.min_length = min_length
+        if not self.model.is_trained:
+            self.model.train(time_series)
+        return self._continue(self.model.forecast(time_series))
 
 
 class SmoothingFilter(Operation):
@@ -132,6 +125,8 @@ class SmoothingFilter(Operation):
             time_series = time_series.rolling(window=self.window,
                                               center=self.center,
                                               min_periods=1).median()
+        else:
+            raise Exception('Invalid method. Select mean or median.')
 
         return self._continue(time_series)
 
@@ -149,11 +144,10 @@ class StabilizeVariance(Operation):
 
         elif self.family == 'binomial':
             # http://blog.as.uky.edu/sta695/wp-content/uploads/2013/01/stabilization.pdf
-            print 'Not implemented yet. Skipping...'
-            return self._continue(time_series)
+            raise NotImplementedError
 
         else:
-            return self._continue(time_series)
+            raise NotImplementedError
 
 
 class Normalization(Operation):
@@ -174,44 +168,32 @@ class Normalization(Operation):
             return self._rescale(x=self._continue(
                 self._rescale(x=time_series,
                               old_min=observed_min, old_max=observed_max,
-                              new_min=self.target_min, new_max=self.target_max)),
+                              new_min=self.target_min,
+                              new_max=self.target_max)),
                 old_min=self.target_min, old_max=self.target_max,
                 new_min=observed_min, new_max=observed_max
             )
 
         else:
-            return self._continue(time_series)
+            raise NotImplementedError
 
     def _rescale(self, x, old_min, old_max, new_min, new_max):
         return (x - old_min) / (old_max - old_min) * (
-        new_max - new_min) + new_min
+            new_max - new_min) + new_min
 
 
 class Differencing(Operation):
-    def __init__(self, method='first', lag=1):
+    def __init__(self, period=1):
         Operation.__init__(self)
-        self.method = method
-        self.lag = lag
+        self.period = period
 
     # Note: No difference whether first or seasonal differences performed first
     #       but recommended seasonal first since maybe stationarity achieved
     # https://www.otexts.org/fpp/8/1
     def apply(self, time_series):
+        print 'Differencing...'
+        original = time_series
+        deltas = time_series.diff(self.period).dropna()
 
-        if self.method == 'first':
-
-            return self._continue(time_series)
-
-
-# y1 y2 y3 y4 y5
-# y2-y1 y3-y2 y4-y3 y5-y4  (store y1, y2, y3, y4)
-
-# predict y6-y5
-# add back y5 to get y6
-
-# predict y2-y1 y3-y2 y4-y3 y5-y4
-# add back y1, y2, y3, y4 to get y2, y3, y4, y5.
-# no value for y1.
-
-
-
+        return original.head(self.period).append(
+            self._continue(deltas) + original.shift(self.period)).dropna()
