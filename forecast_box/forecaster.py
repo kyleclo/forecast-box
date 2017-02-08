@@ -12,8 +12,8 @@ class Forecaster(object):
 
     Members
     -------
-        start_operation:
-            Reference to the first Operation that begins forecast chain
+        operations:
+            list of OpTuple (name, Operation) in order from start to finish
 
     Methods
     -------
@@ -27,20 +27,35 @@ class Forecaster(object):
             Takes a pd.Series object indexed by pd.DatetimeIndex
             and returns a pd.Series object containing forecasted value(s)
             resulting from built-in sequence of Operations.
+            Final Operation should be of type Forecast.
     """
 
     @staticmethod
     def build(operation_specs):
+        if operation_specs[-1].name != 'forecast':
+            raise Exception('Final operation should be a Forecast.')
+
+        operations_list = []
+        min_size = 1
+
         previous_operation = None
         for spec in reversed(operation_specs):
             new_operation = Operation.create(spec.name, spec.params)
             new_operation.next_operation = previous_operation
+            operations_list.append(OpTuple(spec.name, new_operation))
+            min_size = max(min_size, new_operation.min_size)
             previous_operation = new_operation
 
-        return Forecaster(previous_operation)
+        forecaster = Forecaster(operations_list[::-1],
+                                operations_list[0].operation.forward_steps,
+                                min_size)
+        return forecaster
 
-    def __init__(self, start_operation):
-        self.start_operation = start_operation
+    def __init__(self, operations_list, forward_steps, min_size):
+        self.operations_list = operations_list
+        self.forward_steps = forward_steps
+        self.min_size = min_size
 
     def forecast(self, time_series):
-        return self.start_operation.apply(time_series)
+        return self.operations_list[0].operation.apply(time_series)
+

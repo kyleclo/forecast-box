@@ -46,3 +46,4 @@ class TestLastValue(TestCase):
     def test_predict_once(self):
         pass
 
+

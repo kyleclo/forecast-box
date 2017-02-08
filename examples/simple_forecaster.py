@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 
 from forecast_box import *
-
-
+from forecast_box.validate import validate_forecaster
+from sklearn.metrics import mean_squared_error
 
 #################
 #
@@ -17,11 +17,9 @@ from forecast_box import *
 #
 #################
 
-N = 100
+N = 50
 time_series = pd.Series(data=np.float64(np.random.poisson(lam=10, size=N)),
                         index=pd.date_range('2000-01-01', periods=N))
-
-
 
 ###########################
 #
@@ -31,15 +29,9 @@ time_series = pd.Series(data=np.float64(np.random.poisson(lam=10, size=N)),
 
 model_params = {
     'forward_steps': [1, 2, 3, 4, 5],
-    'ar_orders': compute_ar_orders(N=time_series.size,
-                                   forward_steps=[1, 2, 3, 4, 5],
-                                   train_pct=0.8,
-                                   min_order=10,
-                                   min_nrows=40)
+    'ar_orders': [30, 30, 30, 30, 30]
 }
 model = Model.create('linear_regression', model_params)
-
-
 
 ####################
 #
@@ -56,22 +48,19 @@ forecaster = Forecaster.build(
         OpSpec('forecast',
                {'model': model})
     ])
-
-forecaster.forecast(time_series)
-
+print forecaster.forecast(time_series)
 
 
-#############################################################
+########################
 #
-# forecast a different series with previously trained model
+# validate performance
 #
-#############################################################
+########################
 
-N_new = 50
-new_time_series = pd.Series(data=np.float64(np.random.poisson(lam=10, size=N_new)),
-                        index=pd.date_range('2001-01-01', periods=N_new))
+performance = validate_forecaster(forecaster, time_series, mean_squared_error)
+performance.plot()
 
-forecaster.forecast(new_time_series)
+
 
 
 

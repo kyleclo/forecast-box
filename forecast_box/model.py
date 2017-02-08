@@ -6,14 +6,16 @@ Model class
 
 import numpy as np
 import pandas as pd
-from collections import namedtuple
 from sklearn import linear_model
 from _util import *
 
 
-
-# TODO: incorporate X_raw into X_train for train() and forecast()
-# TODO: extend train() and forecast() to allow for multivariate response
+# TODO: name
+# TODO: consider store fixed_params dict or store each param separately?
+# TODO: add time-specific features to X matrix for train() and forecast()
+# TODO: incorporate X_raw into X matrix for train() and forecast()
+# TODO: allow passing in a function that automatically selects ar_order
+# TODO: extend train() and forecast() to allow for multiresponse models
 class Model(object):
     """Class used for training and predicting with time series models
 
@@ -30,13 +32,18 @@ class Model(object):
 
     Members
     -------
+    name:
+
     fixed_params:
-        dict storing parameters. Keys include 'forward_steps' and 'ar_orders'.
-        See specific Model implementations for additional keys.
+        dict storing parameters, including 'forward_steps' and 'ar_orders'.
+        See specific Model implementations for any additional params.
 
     data:
         dict storing input data passed to train() with keys 'y' and 'X'.
         Values are initialized to None.
+
+    is_trained:
+        boolean defaults to False and set to True after running train().
 
     trained_params:
         dict where key = forward_step, and value = trained parameters.
@@ -85,30 +92,35 @@ class Model(object):
     def __init__(self, forward_steps, ar_orders):
         self.name = None
         self.fixed_params = {'forward_steps': forward_steps,
-                             'ar_orders': ar_orders}
-        self.data = {'y': None,
-                     'X': None}
+                             'ar_orders': ar_orders,
+                             'min_size': max(forward_steps) + max(ar_orders)}
+        self.data = {'y': None, 'X': None}
         self.is_trained = False
         self.trained_params = {s: None for s in forward_steps}
         self.fitted_values = {s: None for s in forward_steps}
 
     def train(self, y_raw, X_raw=None):
-        self.data['y'] = y_raw
-        self.data['X'] = X_raw
+        self._check_data_size(y_raw)
+        self.data['y'], self.data['X'] = y_raw, X_raw
+
         for s, o in zip(self.fixed_params['forward_steps'],
                         self.fixed_params['ar_orders']):
             y_train = build_y_train(y_raw, s, o)
             X_train = build_X_train(y_raw, s, o)
             self.trained_params[s] = self._train_once(y_train, X_train)
             self.fitted_values[s] = self._predict_once(X_train, s)
+
         self.is_trained = True
 
     def forecast(self, y_raw, X_raw=None):
+        self._check_data_size(y_raw)
+
         forecasted_values = []
         for s, o in zip(self.fixed_params['forward_steps'],
                         self.fixed_params['ar_orders']):
             X_forecast = build_X_forecast(y_raw, s, o)
             forecasted_values.append(self._predict_once(X_forecast, s))
+
         return pd.concat(forecasted_values, axis=0)
 
     def _train_once(self, y_train, X_train):
@@ -116,6 +128,10 @@ class Model(object):
 
     def _predict_once(self, X_test, forward_step):
         raise NotImplementedError
+
+    def _check_data_size(self, time_series):
+        if time_series.size < self.fixed_params['min_size']:
+            raise Exception('Not enough data. See min_size.')
 
 
 class LastValue(Model):
@@ -141,9 +157,9 @@ class Mean(Model):
 
     def _predict_once(self, X_test, forward_step):
         return X_test.mean(axis=1)
-        #return pd.Series(data=X_test.values.mean(axis=1), index=X_test.index)
 
 
+# TODO: expand constructor to take kwargs into fixed_params
 class LinearRegression(Model):
     """Forecasts future value by fitting linear regression model on AR terms"""
 
@@ -157,5 +173,5 @@ class LinearRegression(Model):
 
     def _predict_once(self, X_test, forward_step):
         model = self.trained_params[forward_step]['model']
-        return pd.DataFrame(model.predict(X_test), index=X_test.index)
+        return pd.Series(model.predict(X_test), index=X_test.index)
 
