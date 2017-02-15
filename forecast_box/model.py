@@ -87,36 +87,34 @@ class Model(object):
 
         return model
 
-    def __init__(self, forward_steps, ar_order):
+    def __init__(self, forward_steps, ar_order, **kwargs):
         self.name = None
         self.fixed_params = {'forward_steps': forward_steps,
                              'ar_order': ar_order,
-                             'min_size': max(forward_steps) + ar_order}
+                             'min_size': max(forward_steps) + ar_order,
+                             'add_day_of_week': kwargs.get('add_day_of_week',
+                                                           False)}
         self.data = {'y_raw': None, 'X_raw': None}
         self.is_trained = False
         self.trained_params = {s: None for s in forward_steps}
         self.fitted_values = {s: None for s in forward_steps}
 
     def train(self, y_raw, X_raw=None):
-        self._check_data_size(y_raw)
+        self._check_inputs(y_raw, X_raw)
         self.data['y'], self.data['X'] = y_raw, X_raw
-
         for s in self.fixed_params['forward_steps']:
-            y_train = build_y_train(y_raw, s, self.fixed_params['ar_order'])
-            X_train = build_X_train(y_raw, s, self.fixed_params['ar_order'], add_day_of_week=False)
+            y_train = self._build_y_train(y_raw, s)
+            X_train = self._build_X_train(y_raw, s)
             self.trained_params[s] = self._train_once(y_train, X_train)
             self.fitted_values[s] = self._predict_once(X_train, s)
-
         self.is_trained = True
 
     def forecast(self, y_raw, X_raw=None):
-        self._check_data_size(y_raw)
-
+        self._check_inputs(y_raw, X_raw)
         forecasted_values = []
         for s in self.fixed_params['forward_steps']:
-            X_forecast = build_X_forecast(y_raw, s, self.fixed_params['ar_order'], add_day_of_week=False)
+            X_forecast = self._build_X_forecast(y_raw, s)
             forecasted_values.append(self._predict_once(X_forecast, s))
-
         return pd.concat(forecasted_values, axis=0)
 
     def _train_once(self, y_train, X_train):
@@ -125,9 +123,54 @@ class Model(object):
     def _predict_once(self, X_test, forward_step):
         raise NotImplementedError
 
-    def _check_data_size(self, time_series):
-        if time_series.size < self.fixed_params['min_size']:
+    # TODO: Check index are DateTime
+    def _check_inputs(self, y_raw, X_raw):
+        if not isinstance(y_raw, pd.Series):
+            raise Exception('y_raw should be pd.Series.')
+        if y_raw.size < self.fixed_params['min_size']:
             raise Exception('Not enough data. See min_size.')
+
+        if X_raw is not None and not isinstance(X_raw, pd.DataFrame):
+            raise Exception('X_raw should be pd.DataFrame.')
+        if X_raw is not None and X_raw.size != y_raw.size:
+            raise Exception('X_raw not same size as y_raw.')
+
+    def _build_y_train(self, time_series, forward_step):
+        ar_order = self.fixed_params['ar_order']
+        return time_series.tail(time_series.size - forward_step - ar_order + 1)
+
+    def _build_X_train(self, time_series, forward_step):
+        ar_order = self.fixed_params['ar_order']
+
+        X = pd.concat([time_series.shift(forward_step + lag - 1) for lag in
+                       range(1, ar_order + 1)], axis=1).dropna(axis=0)
+
+        if self.fixed_params['add_day_of_week']:
+            one_hot = np.stack(
+                [np.float64(time_series.index.dayofweek == index_day) for
+                 index_day in range(7)], axis=1)
+            X = pd.merge(X, pd.DataFrame(data=one_hot,
+                                         index=time_series.index),
+                         how='inner', left_index=True, right_index=True)
+
+        X.columns = np.arange(len(X.columns))
+        return X
+
+    def _build_X_forecast(self, time_series, forward_step):
+        ar_order = self.fixed_params['ar_order']
+        target_date = time_series.index[-1] + forward_step
+
+        X = pd.DataFrame(data=time_series.tail(ar_order)[::-1].reshape(1, -1),
+                         index=[target_date])
+
+        if self.fixed_params['add_day_of_week']:
+            X = pd.merge(X, pd.DataFrame(
+                data=np.float64(np.arange(7) == target_date).reshape(-1, 7),
+                index=[target_date]),
+                         how='inner', left_index=True, right_index=True)
+
+        X.columns = np.arange(len(X.columns))
+        return X
 
 
 class LastValue(Model):
@@ -138,22 +181,22 @@ class LastValue(Model):
               value observed today.
     """
 
-    def __init__(self, forward_steps, ar_order):
-        Model.__init__(self, forward_steps, ar_order)
+    def __init__(self, forward_steps, ar_order, **kwargs):
+        Model.__init__(self, forward_steps, ar_order, **kwargs)
         self.name = 'last_value'
 
     def _train_once(self, y_train, X_train):
         return {}
 
     def _predict_once(self, X_test, forward_step):
-        return X_test.iloc[:,0]
+        return X_test.iloc[:, 0]
 
 
 class Mean(Model):
     """Forecasts future value is equal to the average of past values"""
 
-    def __init__(self, forward_steps, ar_order):
-        Model.__init__(self, forward_steps, ar_order)
+    def __init__(self, forward_steps, ar_order, **kwargs):
+        Model.__init__(self, forward_steps, ar_order, **kwargs)
         self.name = 'mean'
 
     def _train_once(self, y_train, X_train):
@@ -163,12 +206,12 @@ class Mean(Model):
         return X_test.mean(axis=1)
 
 
-# TODO: expand constructor to take kwargs into fixed_params
+# TODO: pop LinearRegression-specific kwargs before passing to Model.__init__
 class LinearRegression(Model):
     """Forecasts future value by fitting linear regression model on AR terms"""
 
-    def __init__(self, forward_steps, ar_order):
-        Model.__init__(self, forward_steps, ar_order)
+    def __init__(self, forward_steps, ar_order, **kwargs):
+        Model.__init__(self, forward_steps, ar_order, **kwargs)
         self.name = 'linear_regression'
 
     def _train_once(self, y_train, X_train):

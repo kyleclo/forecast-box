@@ -10,49 +10,49 @@ import numpy as np
 import pandas as pd
 
 
-def build_y_train(time_series, forward_step, ar_order):
-    """Convert time_series to y Series for training"""
-    if forward_step + ar_order > time_series.size:
-        raise Exception('Not enough data. Decrease forward_step or ar_order.')
-
-    return time_series.tail(time_series.size - forward_step - ar_order + 1)
-
-
-def build_X_train(time_series, forward_step, ar_order, add_day_of_week=True):
-    """Convert time_series to X DataFrame for training"""
-    if time_series.size <= forward_step + ar_order:
-        raise Exception('Not enough data. Decrease forward_step or ar_order.')
-
-    X = pd.concat([time_series.shift(forward_step + lag - 1) for lag in
-                   range(1, ar_order + 1)], axis=1).dropna(axis=0)
-
-    if add_day_of_week == True:
-        X = pd.merge(X, pd.DataFrame(data=np.stack(
-            [np.float64(time_series.index.dayofweek == index_day) for index_day
-             in range(7)], axis=1), index=time_series.index), how='inner',
-                     left_index=True, right_index=True)
-
-    X.columns = np.arange(len(X.columns))
-    return X
-
-
-def build_X_forecast(time_series, forward_step, ar_order, add_day_of_week=True):
-    """Convert time_series to X DataFrame for forecasting"""
-    if forward_step + ar_order > time_series.size:
-        raise Exception('Not enough data. Decrease ar_order.')
-
-    target_date = time_series.index[-1] + forward_step
-    X = pd.DataFrame(data=time_series.tail(ar_order)[::-1].reshape(1, -1),
-                     index=[target_date])
-
-    if add_day_of_week == True:
-        X = pd.merge(X, pd.DataFrame(
-            data=np.float64(np.arange(7) == target_date).reshape(-1, 7),
-            index=[target_date]), how='inner', left_index=True,
-                     right_index=True)
-
-    X.columns = np.arange(len(X.columns))
-    return X
+# def build_y_train(time_series, forward_step, ar_order):
+#     """Convert time_series to y Series for training"""
+#     if forward_step + ar_order > time_series.size:
+#         raise Exception('Not enough data. Decrease forward_step or ar_order.')
+#
+#     return time_series.tail(time_series.size - forward_step - ar_order + 1)
+#
+#
+# def build_X_train(time_series, forward_step, ar_order, add_day_of_week=True):
+#     """Convert time_series to X DataFrame for training"""
+#     if time_series.size <= forward_step + ar_order:
+#         raise Exception('Not enough data. Decrease forward_step or ar_order.')
+#
+#     X = pd.concat([time_series.shift(forward_step + lag - 1) for lag in
+#                    range(1, ar_order + 1)], axis=1).dropna(axis=0)
+#
+#     if add_day_of_week == True:
+#         X = pd.merge(X, pd.DataFrame(data=np.stack(
+#             [np.float64(time_series.index.dayofweek == index_day) for index_day
+#              in range(7)], axis=1), index=time_series.index), how='inner',
+#                      left_index=True, right_index=True)
+#
+#     X.columns = np.arange(len(X.columns))
+#     return X
+#
+#
+# def build_X_forecast(time_series, forward_step, ar_order, add_day_of_week=True):
+#     """Convert time_series to X DataFrame for forecasting"""
+#     if forward_step + ar_order > time_series.size:
+#         raise Exception('Not enough data. Decrease ar_order.')
+#
+#     target_date = time_series.index[-1] + forward_step
+#     X = pd.DataFrame(data=time_series.tail(ar_order)[::-1].reshape(1, -1),
+#                      index=[target_date])
+#
+#     if add_day_of_week == True:
+#         X = pd.merge(X, pd.DataFrame(
+#             data=np.float64(np.arange(7) == target_date).reshape(-1, 7),
+#             index=[target_date]), how='inner', left_index=True,
+#                      right_index=True)
+#
+#     X.columns = np.arange(len(X.columns))
+#     return X
 
 
 def rescale(x, new_min, new_max):
