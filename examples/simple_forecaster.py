@@ -27,11 +27,9 @@ time_series = pd.Series(data=np.float64(np.random.poisson(lam=10, size=N)),
 #
 ###########################
 
-model_params = {
-    'forward_steps': [1, 2, 3, 4, 5],
-    'ar_orders': [30, 30, 30, 30, 30]
-}
-model = Model.create('linear_regression', model_params)
+model = Model.create('linear_regression',
+                     params={'forward_steps': [1, 2, 3, 4, 5],
+                             'ar_order': 10})
 
 ####################
 #
@@ -50,34 +48,37 @@ forecaster = Forecaster.build(
     ])
 print forecaster.forecast(time_series)
 
-
 ########################
 #
 # validate performance
 #
 ########################
 
-performance = validate_forecaster(forecaster, time_series, mean_squared_error)
-performance.plot()
+rmse_over_time = np.sqrt(validate_forecaster(forecaster,
+                                             time_series,
+                                             mean_squared_error))
+overall_rmse = rmse_over_time.mean(axis=0)
 
-
-
-
-
-
-
-
-
+###############################################
 #
-# N = time_series.size
-# index_start = N / 3
-# yhat = pd.Series(
-#     data=[forecaster.forecast(time_series[:i]) for i in range(index_start, N)],
-#     index=pd.date_range(time_series.index[index_start],
-#                         periods=N - index_start))
+# compare performance with another forecaster
 #
-# res = time_series[index_start:] - yhat
-#
-# print time_series.values
-# print yhat.values
-# print res.abs().mean()
+###############################################
+
+forecaster2 = Forecaster.build(
+    operation_specs=[
+        OpSpec('forecast',
+               {'model': Model.create('mean',
+                     params={'forward_steps': [1, 2, 3, 4, 5],
+                             'ar_order': 10})})
+    ])
+
+rmse_over_time2 = np.sqrt(validate_forecaster(forecaster2,
+                                             time_series,
+                                             mean_squared_error))
+overall_rmse2 = rmse_over_time2.mean(axis=0)
+
+pd.concat([rmse_over_time.rename('linear_regression'),
+           rmse_over_time2.rename('mean')], axis=1).plot()
+
+

@@ -10,8 +10,6 @@ from sklearn import linear_model
 from _util import *
 
 
-# TODO: name
-# TODO: consider store fixed_params dict or store each param separately?
 # TODO: add time-specific features to X matrix for train() and forecast()
 # TODO: incorporate X_raw into X matrix for train() and forecast()
 # TODO: allow passing in a function that automatically selects ar_order
@@ -25,17 +23,18 @@ class Model(object):
         list of ints such that Model predicts the value(s) at
         time = N + forward_steps given a time_series of length N.
 
-    ar_orders:
-        list of ints representing number of autoregressive terms as
-        features when converting time_series input into matrix X for
-        training and/or testing.
+    ar_order:
+        int representing number of autoregressive terms when training the
+        model.  Determines number of columns in X_train or X_forecast.
 
     Members
     -------
     name:
 
     fixed_params:
-        dict storing parameters, including 'forward_steps' and 'ar_orders'.
+        dict storing parameters, including 'forward_steps', 'ar_orders',
+        and 'min_size' (which is minimum length of time_series for which
+        training is feasible).
         See specific Model implementations for any additional params.
 
     data:
@@ -85,16 +84,15 @@ class Model(object):
             raise Exception(name + '-class of Model doesnt exist.')
         else:
             model = possible_models[name](**params)
-            model.name = name
 
         return model
 
-    def __init__(self, forward_steps, ar_orders):
+    def __init__(self, forward_steps, ar_order):
         self.name = None
         self.fixed_params = {'forward_steps': forward_steps,
-                             'ar_orders': ar_orders,
-                             'min_size': max(forward_steps) + max(ar_orders)}
-        self.data = {'y': None, 'X': None}
+                             'ar_order': ar_order,
+                             'min_size': max(forward_steps) + ar_order}
+        self.data = {'y_raw': None, 'X_raw': None}
         self.is_trained = False
         self.trained_params = {s: None for s in forward_steps}
         self.fitted_values = {s: None for s in forward_steps}
@@ -103,10 +101,9 @@ class Model(object):
         self._check_data_size(y_raw)
         self.data['y'], self.data['X'] = y_raw, X_raw
 
-        for s, o in zip(self.fixed_params['forward_steps'],
-                        self.fixed_params['ar_orders']):
-            y_train = build_y_train(y_raw, s, o)
-            X_train = build_X_train(y_raw, s, o)
+        for s in self.fixed_params['forward_steps']:
+            y_train = build_y_train(y_raw, s, self.fixed_params['ar_order'])
+            X_train = build_X_train(y_raw, s, self.fixed_params['ar_order'], add_day_of_week=False)
             self.trained_params[s] = self._train_once(y_train, X_train)
             self.fitted_values[s] = self._predict_once(X_train, s)
 
@@ -116,9 +113,8 @@ class Model(object):
         self._check_data_size(y_raw)
 
         forecasted_values = []
-        for s, o in zip(self.fixed_params['forward_steps'],
-                        self.fixed_params['ar_orders']):
-            X_forecast = build_X_forecast(y_raw, s, o)
+        for s in self.fixed_params['forward_steps']:
+            X_forecast = build_X_forecast(y_raw, s, self.fixed_params['ar_order'], add_day_of_week=False)
             forecasted_values.append(self._predict_once(X_forecast, s))
 
         return pd.concat(forecasted_values, axis=0)
@@ -142,6 +138,10 @@ class LastValue(Model):
               value observed today.
     """
 
+    def __init__(self, forward_steps, ar_order):
+        Model.__init__(self, forward_steps, ar_order)
+        self.name = 'last_value'
+
     def _train_once(self, y_train, X_train):
         return {}
 
@@ -151,6 +151,10 @@ class LastValue(Model):
 
 class Mean(Model):
     """Forecasts future value is equal to the average of past values"""
+
+    def __init__(self, forward_steps, ar_order):
+        Model.__init__(self, forward_steps, ar_order)
+        self.name = 'mean'
 
     def _train_once(self, y_train, X_train):
         return {}
@@ -163,12 +167,13 @@ class Mean(Model):
 class LinearRegression(Model):
     """Forecasts future value by fitting linear regression model on AR terms"""
 
-    # def __init__(self, forward_steps, ar_orders):
-    #     Model.__init__(forward_steps, ar_orders)
+    def __init__(self, forward_steps, ar_order):
+        Model.__init__(self, forward_steps, ar_order)
+        self.name = 'linear_regression'
 
     def _train_once(self, y_train, X_train):
-        model = linear_model.LinearRegression().fit(X=X_train,
-                                                    y=y_train)
+        model = linear_model.LinearRegression().fit(y=y_train,
+                                                    X=X_train)
         return {'model': model}
 
     def _predict_once(self, X_test, forward_step):

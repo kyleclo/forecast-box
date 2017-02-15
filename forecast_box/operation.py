@@ -13,6 +13,7 @@ OpSpec = namedtuple('OpSpec', ['name', 'params'])
 OpTuple = namedtuple('OpTuple', ['name', 'operation'])
 
 
+# TODO: rename _apply()
 # TODO: name and auto print message in superclass
 # TODO: enforce minimum size
 # TODO: make apply() wrap _apply() (see Models) to maintain common structure like min_size checking
@@ -91,7 +92,7 @@ class Forecast(Operation):
         Operation.__init__(self)
         self.model = model
         self.forward_steps = model.fixed_params['forward_steps']
-        self.ar_orders = model.fixed_params['ar_orders']
+        self.ar_order = model.fixed_params['ar_order']
         self.min_size = model.fixed_params['min_size']
 
 

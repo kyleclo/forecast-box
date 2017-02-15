@@ -28,7 +28,7 @@ time_series = pd.Series(data=np.float64(np.random.poisson(lam=10, size=N)),
 # 1. instantiate 5 separate models, each with a different forecast horizon
 fixed_params_lv = {
     'forward_steps': [1, 2, 3, 4, 5],
-    'ar_orders': [1, 1, 1, 1, 1]
+    'ar_order': 1
 }
 model_lv = Model.create('last_value', fixed_params_lv)
 
@@ -59,7 +59,7 @@ forecasted_values_lv = model_lv.forecast(time_series)
 
 fixed_params_m = {
     'forward_steps': [1, 2, 3, 4, 5],
-    'ar_orders': [30, 30, 30, 30, 30]
+    'ar_order': 30
 }
 model_m = Model.create('mean', fixed_params_m)
 
@@ -86,7 +86,7 @@ forecasted_values_m = model_m.forecast(time_series)
 
 fixed_params_lr = {
     'forward_steps': [1, 2, 3, 4, 5],
-    'ar_orders': [30, 30, 30, 30, 30]
+    'ar_order': 30
 }
 model_lr = Model.create('linear_regression', fixed_params_lr)
 
@@ -104,3 +104,4 @@ for s in fixed_params_lr['forward_steps']:
     rmse_lr.update({s: np.sqrt(np.mean(residuals ** 2))})
 
 forecasted_values_lr = model_lr.forecast(time_series)
+
