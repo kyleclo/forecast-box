@@ -1,74 +1,77 @@
 """
 
-Model class
+Model base class and specific implementations
 
 """
 
 import numpy as np
 import pandas as pd
 from sklearn import linear_model
+from sklearn.metrics import accuracy_score, mean_squared_error
 from _util import *
 
 
+# TODO: define new metrics class instead of metric function
 # TODO: add time-specific features to X matrix for train() and forecast()
 # TODO: incorporate X_raw into X matrix for train() and forecast()
 # TODO: allow passing in a function that automatically selects ar_order
 # TODO: extend train() and forecast() to allow for multiresponse models
+# TODO: extend data structure for train() results. dict is cumbersome.
 class Model(object):
-    """Class used for training and predicting with time series models
+    """Abstract base class for training and forecasting with time series models
 
     Parameters
     ----------
     forward_steps:
-        list of ints such that Model predicts the value(s) at
-        time = N + forward_steps given a time_series of length N.
+        list of ints representing forecast horizon.  For example,
+        Model with forward_steps = [1, 2] forecasts values 1 and 2
+        time steps beyond input data.
 
     ar_order:
-        int representing number of autoregressive terms when training the
-        model.  Determines number of columns in X_train or X_forecast.
+        int representing number of autoregressive terms in model.  For example,
+        Model with ar_order = 7 will make use of past 7 time steps in forecast.
+
+    kwargs:
+        See fixed_params in __init__() for full list & default values.
+        Common ones include:
+            'add_day_of_week' (bool) - include indicators for day of week
 
     Members
     -------
-    name:
+    name: str; name of particular Model class.
 
     fixed_params:
-        dict storing parameters, including 'forward_steps', 'ar_orders',
-        and 'min_size' (which is minimum length of time_series for which
-        training is feasible).
-        See specific Model implementations for any additional params.
+        dict storing user-provided parameters, e.g. 'forward_steps'.
 
     data:
-        dict storing input data passed to train() with keys 'y' and 'X'.
-        Values are initialized to None.
+        dict storing training data with keys 'y' and 'X'.
 
     is_trained:
-        boolean defaults to False and set to True after running train().
+        bool; initialized to False and set to True after training.
 
     trained_params:
-        dict where key = forward_step, and value = trained parameters.
-        Values are initialized to None.
-        See specific Model implementations for keys.
+        dict storing trained parameters as forward_step (key) and dict
+        of params (value) pairs.  For example, if forward_step = [1, 2],
+        then trained_params = {1: {'theta': 123}, 2: {'theta': 456}} where
+        'theta' is parameter trained by specific Model class.
 
     fitted_values:
         dict where key = forward_step, and value = fitted time_series.
-        Values are initialized to None.
 
     Methods
     -------
     @staticmethod
     create (name, params):
-        Instantiates Model object based on name (str) and a dict of params
-        specific to named Model.
+        Factory method for creating Model objects based on name (str) and
+        params (dict) specific to named Model.
 
     train (y_raw, X_raw=None):
-        Fits model parameters using response vector 'y' and (optional)
-        feature matrix 'X'.  Inputs should be pd.Series / pd.DataFrame,
-        respectively, both indexed by pd.DatetimeIndex.
-        Input data, learned parameters, and fitted values for each
-        'forward_step' are saved as members.
+        Populates 'trained_params' and 'fitted_values' given input
+        response pd.Series 'y_raw' and (optional) feature pd.DataFrame 'X_raw',
+        both indexed by pd.DatetimeIndex.
 
     forecast (y_raw, X_raw=None):
-        Returns pd.Series of forecasted values looking forward from
+        Returns pd.Series of forecasted values 'forward_step' time steps beyond
         last time index of 'y_raw' and 'X_raw' inputs.
     """
 
@@ -98,8 +101,10 @@ class Model(object):
         self.is_trained = False
         self.trained_params = {s: None for s in forward_steps}
         self.fitted_values = {s: None for s in forward_steps}
+        self.residuals = {s: None for s in forward_steps}
+        self.metric = {s: None for s in forward_steps}
 
-    def train(self, y_raw, X_raw=None):
+    def train(self, y_raw, X_raw=None, metric_fun=mean_squared_error):
         self._check_inputs(y_raw, X_raw)
         self.data['y'], self.data['X'] = y_raw, X_raw
         for s in self.fixed_params['forward_steps']:
@@ -107,6 +112,8 @@ class Model(object):
             X_train = self._build_X_train(y_raw, s)
             self.trained_params[s] = self._train_once(y_train, X_train)
             self.fitted_values[s] = self._predict_once(X_train, s)
+            self.residuals[s] = y_train - self.fitted_values[s]
+            self.metric[s] = metric_fun(y_train, self.fitted_values[s])
         self.is_trained = True
 
     def forecast(self, y_raw, X_raw=None):
@@ -117,11 +124,30 @@ class Model(object):
             forecasted_values.append(self._predict_once(X_forecast, s))
         return pd.concat(forecasted_values, axis=0)
 
-    def _train_once(self, y_train, X_train):
-        raise NotImplementedError
+    def summarize(self, num_fitted_show=10):
+        print '\nName: ' + self.name
+        print '\nForward steps: ' + str(self.fixed_params['forward_steps'])
+        print '\nAR order: ' + str(self.fixed_params['ar_order'])
 
-    def _predict_once(self, X_test, forward_step):
-        raise NotImplementedError
+        print '\nPerformance metric:'
+        for s, metric in self.metric.iteritems():
+            print str(s) + ' : ' + str(metric)
+
+        print '\nFitted values:'
+        pretty_fitted_values = reduce(
+            lambda x, y: pd.merge(x, y, how='outer', left_index=True,
+                                  right_index=True),
+            [self.data['y'].to_frame('y')] + [yhat.to_frame(s) for s, yhat in
+                                              self.fitted_values.iteritems()])
+        print str(pretty_fitted_values.tail(num_fitted_show))
+
+    def plot(self):
+        pretty_fitted_values = reduce(
+            lambda x, y: pd.merge(x, y, how='outer', left_index=True,
+                                  right_index=True),
+            [self.data['y'].to_frame('y')] + [yhat.to_frame(s) for s, yhat in
+                                              self.fitted_values.iteritems()])
+        pretty_fitted_values.plot()
 
     # TODO: Check index are DateTime
     def _check_inputs(self, y_raw, X_raw):
@@ -171,6 +197,12 @@ class Model(object):
 
         X.columns = np.arange(len(X.columns))
         return X
+
+    def _train_once(self, y_train, X_train):
+        raise NotImplementedError
+
+    def _predict_once(self, X_test, forward_step):
+        raise NotImplementedError
 
 
 class LastValue(Model):
@@ -222,4 +254,3 @@ class LinearRegression(Model):
     def _predict_once(self, X_test, forward_step):
         model = self.trained_params[forward_step]['model']
         return pd.Series(model.predict(X_test), index=X_test.index)
-

@@ -26,7 +26,8 @@ class TestModel(TestCase):
                            ('mean', Mean),
                            ('linear_regression', LinearRegression)]:
             model = Model.create(name, {'forward_steps': [1, 2, 3],
-                                        'ar_order': 1})
+                                        'ar_order': 1,
+                                        'add_day_of_week': True})
             self.assertIsInstance(model, type)
             self.assertListEqual(model.fixed_params['forward_steps'],
                                  [1, 2, 3])
