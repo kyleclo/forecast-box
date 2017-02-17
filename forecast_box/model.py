@@ -6,8 +6,8 @@ Model base class and specific implementations
 
 import numpy as np
 import pandas as pd
-from sklearn import linear_model
-from sklearn.metrics import accuracy_score, mean_squared_error
+from sklearn import linear_model, ensemble
+from sklearn.metrics import mean_squared_error
 from _util import *
 
 
@@ -56,7 +56,15 @@ class Model(object):
         'theta' is parameter trained by specific Model class.
 
     fitted_values:
-        dict where key = forward_step, and value = fitted time_series.
+        pd.DataFrame indexed by pd.DatetimeIndex where each column is the
+        pd.Series of fitted values on the training set.  Columns are named
+        according to the 'forward_step'.
+
+    residuals:
+        pd.DataFrame of residuals = actual - fitted_values
+
+    metric:
+        dict storing evaluated metric values for each forward_step (key).
 
     Methods
     -------
@@ -65,14 +73,22 @@ class Model(object):
         Factory method for creating Model objects based on name (str) and
         params (dict) specific to named Model.
 
-    train (y_raw, X_raw=None):
+    train (y_raw, X_raw=None, metric_fun=mean_squared_error):
         Populates 'trained_params' and 'fitted_values' given input
         response pd.Series 'y_raw' and (optional) feature pd.DataFrame 'X_raw',
-        both indexed by pd.DatetimeIndex.
+        both indexed by pd.DatetimeIndex.  Also (optional) takes a metric
+        function to evaluate the fitted values per 'forward_step', which
+        defaults to MSE.
 
     forecast (y_raw, X_raw=None):
         Returns pd.Series of forecasted values 'forward_step' time steps beyond
         last time index of 'y_raw' and 'X_raw' inputs.
+
+    summarize ():
+        Displays important values computed via training.
+
+    plot ():
+        Plots fitted values against actual values.
     """
 
     @staticmethod
@@ -80,7 +96,8 @@ class Model(object):
         possible_models = {
             'last_value': LastValue,
             'mean': Mean,
-            'linear_regression': LinearRegression
+            'linear_regression': LinearRegression,
+            'random_forest': RandomForest
         }
 
         if possible_models.get(name) is None:
@@ -100,8 +117,8 @@ class Model(object):
         self.data = {'y_raw': None, 'X_raw': None}
         self.is_trained = False
         self.trained_params = {s: None for s in forward_steps}
-        self.fitted_values = {s: None for s in forward_steps}
-        self.residuals = {s: None for s in forward_steps}
+        self.fitted_values = pd.DataFrame()
+        self.residuals = pd.DataFrame()
         self.metric = {s: None for s in forward_steps}
 
     def train(self, y_raw, X_raw=None, metric_fun=mean_squared_error):
@@ -113,7 +130,8 @@ class Model(object):
             self.trained_params[s] = self._train_once(y_train, X_train)
             self.fitted_values[s] = self._predict_once(X_train, s)
             self.residuals[s] = y_train - self.fitted_values[s]
-            self.metric[s] = metric_fun(y_train, self.fitted_values[s])
+            self.metric[s] = metric_fun(y_train,
+                                        self.fitted_values[s].dropna())
         self.is_trained = True
 
     def forecast(self, y_raw, X_raw=None):
@@ -124,7 +142,7 @@ class Model(object):
             forecasted_values.append(self._predict_once(X_forecast, s))
         return pd.concat(forecasted_values, axis=0)
 
-    def summarize(self, num_fitted_show=10):
+    def summarize(self):
         print '\nName: ' + self.name
         print '\nForward steps: ' + str(self.fixed_params['forward_steps'])
         print '\nAR order: ' + str(self.fixed_params['ar_order'])
@@ -134,20 +152,12 @@ class Model(object):
             print str(s) + ' : ' + str(metric)
 
         print '\nFitted values:'
-        pretty_fitted_values = reduce(
-            lambda x, y: pd.merge(x, y, how='outer', left_index=True,
-                                  right_index=True),
-            [self.data['y'].to_frame('y')] + [yhat.to_frame(s) for s, yhat in
-                                              self.fitted_values.iteritems()])
-        print str(pretty_fitted_values.tail(num_fitted_show))
+        print pd.merge(self.data['y'].to_frame('y'), self.fitted_values,
+                       how='outer', left_index=True, right_index=True)
 
     def plot(self):
-        pretty_fitted_values = reduce(
-            lambda x, y: pd.merge(x, y, how='outer', left_index=True,
-                                  right_index=True),
-            [self.data['y'].to_frame('y')] + [yhat.to_frame(s) for s, yhat in
-                                              self.fitted_values.iteritems()])
-        pretty_fitted_values.plot()
+        pd.merge(self.data['y'].to_frame('y'), self.fitted_values,
+                 how='outer', left_index=True, right_index=True).plot()
 
     # TODO: Check index are DateTime
     def _check_inputs(self, y_raw, X_raw):
@@ -254,3 +264,21 @@ class LinearRegression(Model):
     def _predict_once(self, X_test, forward_step):
         model = self.trained_params[forward_step]['model']
         return pd.Series(model.predict(X_test), index=X_test.index)
+
+
+class RandomForest(Model):
+    """Forecasts future value by fitting random forest model on AR terms"""
+
+    def __init__(self, forward_steps, ar_order, **kwargs):
+        Model.__init__(self, forward_steps, ar_order, **kwargs)
+        self.name = 'random_forest'
+
+    def _train_once(self, y_train, X_train):
+        model = ensemble.RandomForestRegressor().fit(y=y_train,
+                                                     X=X_train)
+        return {'model': model}
+
+    def _predict_once(self, X_test, forward_step):
+        model = self.trained_params[forward_step]['model']
+        return pd.Series(model.predict(X_test), index=X_test.index)
+
