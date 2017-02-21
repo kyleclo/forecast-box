@@ -11,6 +11,7 @@ from model import Model
 
 
 # TODO: different versions with resampling or subsampling
+# TODO: return DataFrame of forecasted_values along with metric?
 def validate_model(name, params, time_series, metric_fun):
     """Evaluates performance of Model forecast method on time series"""
 

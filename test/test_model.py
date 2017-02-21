@@ -13,6 +13,7 @@ from pandas.util.testing import assert_series_equal, assert_index_equal, \
 from forecast_box.model import *
 
 
+# TODO: Check forward steps <= 0
 class ExampleModel(Model):
     def __init__(self, forward_steps, ar_order, **kwargs):
         Model.__init__(self, forward_steps, ar_order, **kwargs)
